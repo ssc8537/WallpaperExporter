@@ -6,7 +6,7 @@
 
 新手验收请阅读：`docs/V1_BEGINNER_ACCEPTANCE_GUIDE.md`。
 
-`past_files_can_remove` contains old requirement confirmations. Removing that folder does not affect the program.
+V1 已于 2026-07-21 完成用户 Windows 11 验收。源代码、下载 ZIP 和新手验收教程保留；过往需求确认文件已移除，不影响程序运行。
 
 ## 主要功能
 

@@ -4,6 +4,10 @@
 
 V1 is the first publishable Windows 11 build of Wallpaper Exporter. It keeps original JPG/PNG bytes when exporting static snapshots, reads original Workshop titles, supports video frame selection, and avoids duplicate exports by SHA-256 content matching.
 
+## Acceptance status
+
+The user confirmed on 2026-07-21 that the complete V1 beginner acceptance guide passed. V1 is the accepted stable baseline. No additional feature stage is currently planned.
+
 ## Current UI behavior
 
 - Startup defers the large Workshop scan until the Wallpaper library page is opened.

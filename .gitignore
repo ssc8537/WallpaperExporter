@@ -7,4 +7,6 @@ dev-artifacts/ui-check/
 dev-artifacts/root-pycache-final/
 dev-artifacts/*
 dist/V1/
+dist/WallpaperExporter.exe
+dist/_internal/
 *.log
