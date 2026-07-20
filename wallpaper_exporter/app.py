@@ -785,7 +785,6 @@ class MainWindow(QMainWindow):
         self.workshop_page.close_preview_requested.connect(self.close_dynamic_previews)
         self.workshop_page.direct_batch_requested.connect(self.export_direct_batch)
         self.workshop_page.video_batch_requested.connect(self.export_video_batch)
-        self.workshop_page.manage_requested.connect(self.open_project_management)
         self.workshop_page.load_progress_changed.connect(self._update_library_progress)
         self.shortcuts_page.save_requested.connect(self.export_current)
         self.shortcuts_page.next_requested.connect(self.next_wallpaper)

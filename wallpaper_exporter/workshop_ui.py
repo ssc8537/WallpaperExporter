@@ -64,7 +64,6 @@ class ProjectCard(QFrame):
     selection_changed = Signal(str, bool)
     video_requested = Signal(object)
     play_requested = Signal(object)
-    manage_requested = Signal(object)
 
     def __init__(self, project: WorkshopProject, selected: bool = False, card_width: int = 180, parent=None) -> None:
         super().__init__(parent)
@@ -121,17 +120,7 @@ class ProjectCard(QFrame):
         else:
             action.setText("直接保存" if card_width < 190 else "可加入直接保存")
             action.setEnabled(project.is_direct_image)
-        actions = QHBoxLayout()
-        actions.setSpacing(5)
-        actions.addWidget(action, 1)
-        manage = QPushButton("Steam 管理")
-        manage.setObjectName("cardButton")
-        manage.setToolTip("打开该项目的 Steam Workshop 页面，可在页面中取消订阅")
-        manage.clicked.connect(lambda: self.manage_requested.emit(self.project))
-        if card_width < 150:
-            manage.setText("管理")
-        actions.addWidget(manage)
-        root.addLayout(actions)
+        root.addWidget(action)
         self.check.toggled.connect(lambda checked: self.selection_changed.emit(project.workshop_id, checked))
 
 
@@ -142,7 +131,6 @@ class WorkshopPage(QWidget):
     close_preview_requested = Signal()
     direct_batch_requested = Signal(list)
     video_batch_requested = Signal(list)
-    manage_requested = Signal(object)
     load_progress_changed = Signal(int, int)
 
     PAGE_SIZE = 48
@@ -315,7 +303,6 @@ class WorkshopPage(QWidget):
             card.selection_changed.connect(self._selection_changed)
             card.video_requested.connect(self.video_requested)
             card.play_requested.connect(self.play_requested)
-            card.manage_requested.connect(self.manage_requested)
             self.grid.addWidget(card, index // columns, index % columns)
             card.show()
             self.cards.append(card)

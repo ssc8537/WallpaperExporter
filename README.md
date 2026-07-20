@@ -4,6 +4,8 @@
 
 当前发布基线：`V1`。推荐仓库英文名：`wallpaper-exporter`。
 
+新手验收请阅读：`docs/V1_BEGINNER_ACCEPTANCE_GUIDE.md`。
+
 `past_files_can_remove` contains old requirement confirmations. Removing that folder does not affect the program.
 
 ## 主要功能
