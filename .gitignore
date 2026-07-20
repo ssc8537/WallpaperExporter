@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+dev-artifacts/build/
+dev-artifacts/build-spec/
+dev-artifacts/ui-check/
+dev-artifacts/root-pycache-final/
+dev-artifacts/*
+dist/V1/
+*.log
