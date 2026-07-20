@@ -202,8 +202,23 @@ class WorkshopScanner:
 def scan_project_from_source(source: str) -> WorkshopProject | None:
     path = Path(source)
     directory = path.parent
-    if not directory.is_dir() or not directory.name.isdigit():
-        return None
+    if not directory.is_dir():
+        normalized = source.replace("\\", "/")
+        match = re.search(r"/431960/(\d+)/", normalized)
+        if not match:
+            return None
+        workshop_id = match.group(1)
+        suffix = path.suffix.lower()
+        project_type = "video" if suffix in VIDEO_SUFFIXES else "scene" if suffix == ".pkg" else "unknown"
+        return WorkshopProject(
+            workshop_id=workshop_id,
+            title=f"Workshop 项目 {workshop_id}（本地文件已不存在）",
+            project_type=project_type,
+            project_dir=str(directory),
+            project_json="",
+            content_path=source,
+            preview_path="",
+        )
     return WorkshopScanner(directory.parent)._scan_one(directory)
 
 
@@ -277,7 +292,12 @@ class WallpaperEngineController:
     def open_file(self, source: str, monitor: int = 0) -> None:
         if not self.available or not source:
             raise OSError("未找到 Wallpaper Engine 主程序或壁纸源文件。")
-        self._run(["-control", "openWallpaper", "-file", source, "-monitor", str(monitor)])
+        path = Path(source)
+        project_json = path.parent / "project.json"
+        control_source = str(project_json) if project_json.is_file() else source
+        if not Path(control_source).is_file():
+            raise OSError("壁纸本地文件不存在，可能已经取消订阅；为避免空桌面，已停止切换。")
+        self._run(["-control", "openWallpaper", "-file", control_source, "-monitor", str(monitor)])
 
     def play_in_window(self, project: WorkshopProject, width: int = 1280, height: int = 720) -> str:
         source = project.project_json if project.project_json else project.content_path

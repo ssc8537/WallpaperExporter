@@ -11,6 +11,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PIL import Image
 from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QListWidgetItem
 
 from wallpaper_exporter.app import MainWindow
 from wallpaper_exporter.core import ConfigStore, WallpaperService
@@ -81,6 +82,17 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertEqual(self.window.size().width(), 900)
         self.assertEqual(self.window.size().height(), 585)
         self.assertGreaterEqual(self.window.minimumWidth(), 820)
+
+        self.window.nav.setCurrentRow(5)
+        self.app.processEvents()
+        selected_rect = self.window.nav.visualItemRect(self.window.nav.item(5))
+        self.assertEqual(self.window.nav.currentRow(), 5)
+        self.assertTrue(selected_rect.intersects(self.window.nav.viewport().rect()))
+
+        for index in range(4):
+            self.window.nav.addItem(QListWidgetItem(f"附加页面 {index + 1}"))
+        self.app.processEvents()
+        self.assertGreater(self.window.nav.verticalScrollBar().maximum(), 0)
 
     def test_workshop_grid_is_responsive_and_preview_is_not_cropped(self) -> None:
         self.window = MainWindow(self.service)

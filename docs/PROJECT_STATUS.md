@@ -15,8 +15,9 @@ V1 is the first publishable Windows 11 build of Wallpaper Exporter. It keeps ori
 
 - Dynamic preview starts asynchronously and can take a moment to appear. This is expected Wallpaper Engine loading behavior and is not fully optimized yet.
 - Steam does not expose a safe public Wallpaper Engine command for one-click unsubscribe. The management button opens the exact Workshop page so Steam can perform the authenticated unsubscribe action.
-- A Scene/Web wallpaper may not produce a new `WallpaperEngineLockOverride.jpg` unless Wallpaper Engine's override snapshot feature is enabled. The program never fabricates a 4K image from a 2K snapshot.
+- A Scene/Web wallpaper may not produce a new `WallpaperEngineLockOverride.jpg` unless Wallpaper Engine's override snapshot feature is enabled. In that case the program captures the actual rendered desktop at the monitor's real resolution while temporarily hiding desktop chrome, then restores all windows. It never fabricates a 4K image from a 2K capture.
 - The current-page image is based on the newest valid primary Windows Themes snapshot. If Wallpaper Engine has not written a new snapshot, the displayed image cannot represent a newer rendered Scene frame without capturing or changing the desktop.
+- Wallpaper Engine can keep an unsubscribed project playing in memory after its Workshop folder disappears. The program retains the Workshop ID for management and desktop capture, but blocks reopening the missing source so the desktop cannot become blank.
 
 ## Version rule
 

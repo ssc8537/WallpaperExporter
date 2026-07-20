@@ -7,7 +7,13 @@ from pathlib import Path
 
 from PIL import Image
 
-from wallpaper_exporter.workshop import WallpaperEngineController, WorkshopScanner, project_export_stem, sanitize_title
+from wallpaper_exporter.workshop import (
+    WallpaperEngineController,
+    WorkshopScanner,
+    project_export_stem,
+    sanitize_title,
+    scan_project_from_source,
+)
 
 
 class WorkshopScannerTests(unittest.TestCase):
@@ -124,6 +130,53 @@ class WorkshopScannerTests(unittest.TestCase):
         controller = WallpaperEngineController(engine)
 
         self.assertEqual(controller.previous_wallpaper_file(), str(previous))
+
+    def test_open_scene_source_normalizes_to_project_json(self) -> None:
+        directory = self.make_project("901", {"title": "Scene", "type": "scene", "file": "scene.json"})
+        scene = directory / "scene.pkg"
+        scene.write_bytes(b"PKGV0001")
+        engine = self.root / "engine"
+        engine.mkdir()
+        (engine / "wallpaper64.exe").write_bytes(b"")
+        controller = WallpaperEngineController(engine)
+        captured = []
+        controller._run = lambda arguments: captured.append(list(arguments))
+
+        controller.open_file(str(scene))
+
+        self.assertEqual(captured[0][3], str(directory / "project.json"))
+
+    def test_scans_local_project_folder_without_numeric_workshop_id(self) -> None:
+        directory = self.make_project("My Local Wallpaper", {"title": "本地壁纸", "type": "video", "file": "wall.mp4"})
+        video = directory / "wall.mp4"
+        video.write_bytes(b"video")
+
+        project = scan_project_from_source(str(video))
+
+        self.assertIsNotNone(project)
+        self.assertEqual(project.title, "本地壁纸")
+
+    def test_missing_workshop_source_keeps_id_for_management(self) -> None:
+        source = self.root / "431960" / "778899" / "missing.mp4"
+
+        project = scan_project_from_source(str(source))
+
+        self.assertIsNotNone(project)
+        self.assertEqual(project.workshop_id, "778899")
+        self.assertIn("本地文件已不存在", project.title)
+
+    def test_open_missing_source_stops_before_wallpaper_command(self) -> None:
+        engine = self.root / "engine"
+        engine.mkdir()
+        (engine / "wallpaper64.exe").write_bytes(b"")
+        controller = WallpaperEngineController(engine)
+        called = []
+        controller._run = lambda arguments: called.append(arguments)
+
+        with self.assertRaises(OSError):
+            controller.open_file(str(self.root / "missing" / "scene.pkg"))
+
+        self.assertEqual(called, [])
 
 
 if __name__ == "__main__":

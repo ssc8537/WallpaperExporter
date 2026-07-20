@@ -39,6 +39,7 @@ from PySide6.QtWidgets import (
 )
 
 from .core import ExportRecord, WallpaperCandidate, WallpaperService, display_size, resolution_label
+from .desktop_capture import capture_rendered_desktop, enable_per_monitor_dpi
 from .hotkeys import GlobalHotkeyManager
 from .video_tools import VideoFrameDialog, extract_video_fractions, format_time, save_qimage
 from .workshop import (
@@ -633,11 +634,14 @@ class MainWindow(QMainWindow):
         self._navigation_history: list[str] = []
         self._navigation_index = -1
         self._navigation_pending_target = ""
+        self._navigation_busy = False
         self.engine_controller = WallpaperEngineController(engine) if engine else None
         self.active_preview_names: set[str] = set()
         self.current_candidate: WallpaperCandidate | None = None
         self.current_project: WorkshopProject | None = None
         self.current_snapshot_stale = False
+        self.current_rendered_candidate: WallpaperCandidate | None = None
+        self.current_rendered_project_key = ""
         self.setWindowTitle("樱海壁纸收藏夹 · Wallpaper Engine 导出助手")
         self.setMinimumSize(820, 540)
         self.resize(900, 585)
@@ -696,10 +700,12 @@ class MainWindow(QMainWindow):
         self.nav.setObjectName("navigation")
         self.nav.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.nav.setFixedHeight(226)
-        self.nav.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.nav.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.nav.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         for text in ("当前壁纸", "Wallpaper 库", "Themes 批量", "更新与历史", "设置", "桌面全局快捷键"):
             item = QListWidgetItem(text)
             item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            item.setSizeHint(QSize(0, 32))
             self.nav.addItem(item)
         self.nav.setCurrentRow(0)
         side.addWidget(self.nav)
@@ -818,7 +824,6 @@ class MainWindow(QMainWindow):
         ]
         self.heading.setText(titles[index][0])
         self.subtitle.setText(titles[index][1])
-        QTimer.singleShot(0, lambda: self.nav.verticalScrollBar().setValue(0))
         if index == 1 and not self.workshop_projects and not self._workshop_scan_started:
             QTimer.singleShot(0, self.scan_workshop)
 
@@ -852,42 +857,84 @@ class MainWindow(QMainWindow):
             self.close_dynamic_previews()
 
     def next_wallpaper(self) -> None:
+        if self._navigation_busy:
+            self.show_toast("正在等待 Wallpaper Engine 完成上一次切换，请稍候。", duplicate=True)
+            return
         controller = self._controller_or_warn()
         if controller is None:
             return
         current = controller.current_wallpaper_file()
         self._remember_navigation(current)
         try:
+            self._navigation_busy = True
             controller.next_wallpaper(0)
         except OSError as exc:
+            self._navigation_busy = False
             QMessageBox.warning(self, "切换失败", str(exc))
             return
-        self.show_toast("已发送“下一张”命令。")
-        QTimer.singleShot(1200, self.refresh_all)
+        self.show_toast("已发送“下一张”命令，正在等待桌面完成切换。")
+        QTimer.singleShot(180, lambda: self._wait_for_next(controller, current, 35))
 
     def previous_wallpaper(self) -> None:
+        if self._navigation_busy:
+            self.show_toast("正在等待 Wallpaper Engine 完成上一次切换，请稍候。", duplicate=True)
+            return
         controller = self._controller_or_warn()
         if controller is None:
             return
-        previous = ""
         target_index = self._navigation_index - 1
-        if target_index >= 0:
-            previous = self._navigation_history[target_index]
-        if not previous:
-            previous = controller.previous_wallpaper_file()
-        if not previous:
-            self.show_toast("Wallpaper Engine 的最近记录中没有找到可返回的上一张。", duplicate=True)
+        if target_index < 0:
+            self.show_toast("本次运行还没有可返回的上一张记录。", duplicate=True)
             return
+        previous = self._navigation_history[target_index]
         try:
+            self._navigation_busy = True
             controller.open_file(previous)
         except OSError as exc:
+            self._navigation_busy = False
             QMessageBox.warning(self, "返回失败", str(exc))
             return
-        if target_index >= 0 and previous == self._navigation_history[target_index]:
+        self.show_toast("正在返回最近使用的上一张壁纸。")
+        QTimer.singleShot(180, lambda: self._wait_for_previous(controller, previous, target_index, 35))
+
+    def _wait_for_next(self, controller: WallpaperEngineController, before: str, attempts: int) -> None:
+        current = controller.current_wallpaper_file()
+        if current and self._project_key(current) != self._project_key(before):
+            self._navigation_busy = False
+            self._sync_navigation(current)
+            self.refresh_all()
+            self.show_toast("已切换到下一张壁纸。")
+            return
+        if attempts <= 0:
+            self._navigation_busy = False
+            self.show_toast("Wallpaper Engine 未在预期时间内完成切换，请再试一次。", duplicate=True)
+            return
+        QTimer.singleShot(180, lambda: self._wait_for_next(controller, before, attempts - 1))
+
+    def _wait_for_previous(
+        self, controller: WallpaperEngineController, target: str, target_index: int, attempts: int
+    ) -> None:
+        current = controller.current_wallpaper_file()
+        if current and self._project_key(current) == self._project_key(target):
             self._navigation_index = target_index
-            self._navigation_pending_target = previous
-        self.show_toast("已返回最近使用的上一张壁纸。")
-        QTimer.singleShot(1200, self.refresh_all)
+            self._navigation_pending_target = ""
+            self._navigation_busy = False
+            self.refresh_all()
+            self.show_toast("已返回最近使用的上一张壁纸。")
+            return
+        if attempts <= 0:
+            self._navigation_busy = False
+            self.show_toast("返回上一张失败，已停止继续切换，避免桌面变空。", duplicate=True)
+            return
+        QTimer.singleShot(180, lambda: self._wait_for_previous(controller, target, target_index, attempts - 1))
+
+    @staticmethod
+    def _project_key(source: str) -> str:
+        normalized = source.replace("\\", "/").casefold()
+        parts = normalized.split("/431960/", 1)
+        if len(parts) == 2:
+            return parts[1].split("/", 1)[0]
+        return str(Path(source).parent.resolve(strict=False)).casefold()
 
     def _remember_navigation(self, current: str) -> None:
         if not current:
@@ -936,6 +983,14 @@ class MainWindow(QMainWindow):
             self._sync_navigation(current_file)
         self.current_project = scan_project_from_source(current_file) if current_file else None
         self.current_snapshot_stale = self._snapshot_is_stale(self.current_candidate, self.current_project, controller)
+        if (
+            self.current_rendered_candidate
+            and self.current_project
+            and self.current_rendered_project_key == self.current_project.workshop_id
+            and Path(self.current_rendered_candidate.path).is_file()
+        ):
+            self.current_candidate = self.current_rendered_candidate
+            self.current_snapshot_stale = False
         self.current_page.show_candidate(
             self.current_candidate,
             self.current_project.title if self.current_project else "",
@@ -1025,11 +1080,18 @@ class MainWindow(QMainWindow):
         self._set_busy(False, f"Wallpaper 库扫描完成：{len(self.workshop_projects)} 项")
 
     def preview_current_snapshot(self) -> None:
-        candidate = self.service.current_wallpaper()
-        if not candidate:
+        self.refresh_all()
+        if self.current_snapshot_stale and self.current_project:
+            preview = Path(self.current_project.preview_path)
+            if preview.is_file():
+                ImagePreviewDialog(preview, f"当前项目预览 · {self.current_project.title}", self).exec()
+            else:
+                self.show_toast("当前项目已识别，但 Wallpaper Engine 尚未生成可预览的新快照。", duplicate=True)
+            return
+        if not self.current_candidate:
             QMessageBox.information(self, "没有当前快照", "未找到有效的 WallpaperEngineLockOverride.jpg。")
             return
-        ImagePreviewDialog(Path(candidate.path), f"当前快照 · {candidate.resolution}", self).exec()
+        ImagePreviewDialog(Path(self.current_candidate.path), f"当前快照 · {self.current_candidate.resolution}", self).exec()
 
     def preview_current_live(self) -> None:
         controller = self._controller_or_warn()
@@ -1189,7 +1251,7 @@ class MainWindow(QMainWindow):
             answer = QMessageBox.warning(
                 self,
                 "将连续切换桌面壁纸",
-                f"其中 {len(composited)} 个 Scene/Web 项目必须逐个应用到桌面，等待 WallpaperEngineLockOverride.jpg 更新后保存。\n\n"
+                f"其中 {len(composited)} 个 Scene/Web 项目必须逐个应用到桌面。程序优先读取新快照；若 Wallpaper Engine 未生成快照，会短暂显示纯桌面并抓取实际渲染帧。\n\n"
                 "过程中桌面会连续变化；程序结束或取消后会尝试恢复原壁纸。请保持 Wallpaper Engine 正常运行。\n\n是否继续？",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
@@ -1203,7 +1265,13 @@ class MainWindow(QMainWindow):
         progress.setWindowTitle("直接 / Scene 高画质保存")
         progress.setWindowModality(Qt.WindowModality.WindowModal)
         progress.setMinimumDuration(0)
+        progress.setMinimumSize(680, 170)
+        progress_label = progress.findChild(QLabel)
+        if progress_label:
+            progress_label.setWordWrap(True)
+            progress_label.setMinimumWidth(540)
         success = failed = skipped = 0
+        failure_messages: list[str] = []
         original_wallpaper = controller.current_wallpaper_file() if controller else ""
         self._set_busy(True, "正在处理直接/场景项目…")
         current_index = 0
@@ -1243,10 +1311,12 @@ class MainWindow(QMainWindow):
                     before_modified = before.modified_at if before else ""
                     try:
                         controller.apply_project(project)
-                    except OSError:
+                    except OSError as exc:
                         failed += 1
+                        failure_messages.append(f"{project.title}：切换失败，{exc}")
                         continue
-                    deadline = time.monotonic() + 20.0
+                    applied_at = time.monotonic()
+                    deadline = applied_at + 8.0
                     captured = None
                     while time.monotonic() < deadline and not progress.wasCanceled():
                         QApplication.processEvents()
@@ -1256,13 +1326,18 @@ class MainWindow(QMainWindow):
                         changed = candidate and (
                             candidate.content_hash != before_hash or candidate.modified_at != before_modified
                         )
-                        already_current = project.workshop_id in original_wallpaper
-                        if candidate and selected_matches and (changed or already_current):
+                        if candidate and selected_matches and changed:
                             captured = candidate
+                            break
+                        if selected_matches and time.monotonic() - applied_at >= 2.5:
+                            progress.setLabelText(f"抓取桌面实际渲染帧：{project.title}")
+                            QApplication.processEvents()
+                            captured = capture_rendered_desktop(self.service)
                             break
                         time.sleep(0.25)
                     if captured is None:
                         failed += 1
+                        failure_messages.append(f"{project.title}：未确认桌面切换或无法抓取渲染帧")
                         continue
                     record = self.service.export_candidate(
                         captured,
@@ -1288,6 +1363,9 @@ class MainWindow(QMainWindow):
             f"直接/场景处理完成：保存 {success}，重复 {skipped}，失败 {failed}，不支持 {unsupported}",
             duplicate=bool(failed or skipped),
         )
+        if failure_messages:
+            details = "\n".join(failure_messages[:6])
+            QMessageBox.warning(self, "部分壁纸保存失败", f"以下项目没有保存成功：\n\n{details}")
 
     def _controller_or_warn(self, silent: bool = False) -> WallpaperEngineController | None:
         engine = discover_engine_dir(str(self.service.config.get("wallpaper_engine_dir", "")))
@@ -1337,7 +1415,12 @@ class MainWindow(QMainWindow):
     def export_current(self) -> None:
         self.refresh_all()
         if not self.current_candidate:
-            QMessageBox.warning(self, "没有可导出的快照", "未找到有效的 WallpaperEngineLockOverride.jpg。\n请先让 Wallpaper Engine 生成锁屏覆盖快照。")
+            if self.current_project:
+                self.show_toast("没有可用快照，正在抓取当前桌面渲染帧。")
+                QApplication.processEvents()
+                self._capture_and_export_project(self.current_project)
+                return
+            QMessageBox.warning(self, "没有可导出的画面", "未找到有效快照，也无法识别 Wallpaper Engine 当前项目。")
             return
         if self.current_snapshot_stale and self.current_project:
             if self.current_project.is_direct_image:
@@ -1356,10 +1439,32 @@ class MainWindow(QMainWindow):
                 self.show_toast("当前桌面快照已经过期，已打开原始视频选帧器，不会保存旧快照。", duplicate=True)
                 QTimer.singleShot(120, lambda: self.open_video_picker(self.current_project))
                 return
-            self.show_toast("当前项目已切换，但 Wallpaper Engine 尚未生成新快照；旧图已被阻止保存。", duplicate=True)
+            self.show_toast("Wallpaper Engine 未生成新快照，正在抓取当前桌面渲染帧。")
+            QApplication.processEvents()
+            self._capture_and_export_project(self.current_project)
             return
         record = self._export_current_named(self.current_candidate)
         self._show_export_result(record)
+
+    def _capture_and_export_project(self, project: WorkshopProject) -> ExportRecord | None:
+        candidate = capture_rendered_desktop(self.service)
+        if candidate is None:
+            QMessageBox.warning(self, "桌面帧保存失败", "无法读取 Wallpaper Engine 当前桌面渲染帧，所有桌面窗口已恢复。")
+            return None
+        self.current_rendered_candidate = candidate
+        self.current_rendered_project_key = project.workshop_id
+        self.current_candidate = candidate
+        self.current_snapshot_stale = False
+        self.current_page.show_candidate(candidate, project.title)
+        record = self.service.export_candidate(
+            candidate,
+            preferred_stem=project_export_stem(self.service.export_dir, project, ".png"),
+            original_title=project.title,
+            workshop_id=project.workshop_id if project.workshop_id.isdigit() else "",
+            project_path=project.project_json or project.project_dir,
+        )
+        self._show_export_result(record)
+        return record
 
     def export_batch(self) -> None:
         selected = self.batch_page.selected_candidates()
@@ -1606,6 +1711,7 @@ class MainWindow(QMainWindow):
 
 def run() -> int:
     if sys.platform == "win32":
+        enable_per_monitor_dpi()
         try:
             import ctypes
 
@@ -1615,6 +1721,8 @@ def run() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName("樱海壁纸收藏夹")
     app.setOrganizationName("Local")
+    if os.environ.get("WALLPAPER_EXPORTER_CAPTURE_SMOKE") == "1":
+        return 0 if capture_rendered_desktop(WallpaperService()) else 4
     video_smoke = os.environ.get("WALLPAPER_EXPORTER_VIDEO_SMOKE", "")
     if video_smoke:
         result = extract_video_fractions(Path(video_smoke), [0.5], 30000)
